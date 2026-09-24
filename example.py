@@ -3,12 +3,23 @@ import json
 from datetime import datetime, timedelta
 
 
-credentials = {}
-with open('credentials.json') as ifh:
-    credentials = json.load(ifh)
-# look at credentials_example.json
-# credentials = {"username": "you@example.org", "password": "yourpassword" }
-client = InvestopediaApi(credentials)
+# Investopedia now uses passwordless sign-in.
+#
+# Recommended: export the tokens from an already signed-in simulator session:
+#   INVESTOPEDIA_ACCESS_TOKEN=...
+#   INVESTOPEDIA_REFRESH_TOKEN=...   # optional, but recommended for long-running use
+#
+# Then the client can authenticate without a browser:
+client = InvestopediaApi()
+
+# Alternatively, load the same values from a JSON file:
+# with open("credentials.json", encoding="utf-8") as ifh:
+#     auth = json.load(ifh)
+# client = InvestopediaApi(auth)
+#
+# Select a specific custom game if required:
+# client = InvestopediaApi(auth, game_name="My custom game")
+# You can also select with game_id=... or portfolio_id=....
 
 p = client.portfolio
 print("\nPortfolio Details")
