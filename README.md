@@ -1,264 +1,185 @@
-## Description
-A simple Python API for Investopedia's stock simulator games.
+# Investopedia Simulator API
+
+Unofficial Python client for Investopedia's Stock Simulator.
+
+This fork modernizes authentication for Investopedia's current passwordless sign-in flow while keeping the original GraphQL-based trading implementation.
 
 ## Features
-Currently you can programmatically:
-* Read all positions in your stock, and short portfolios and get quotes for each position
-* Fetch and cancel pending/open trades
-* Buy/Sell long positions
-* Short sell/cover short positions
-* Buy/sell options
-* Perform option chain lookups
-* Buy/sell options
 
-## Dependencies
-To use this API, there are a few dependencies that you will need to install.  See the below sections for an explanation of each.
+- Read active Investopedia Simulator games and portfolios
+- Select a custom game by `game_name`, `game_id`, or `portfolio_id`
+- Read long, short, and option positions
+- Read and cancel pending orders
+- Buy/sell stocks
+- Short sell / buy to cover
+- Buy/sell options
+- Query stock quotes and option chains
+- Reuse OIDC refresh tokens for unattended/headless operation
 
-### Python
-This API is intended to be used for writing Python programs to automate trades in the Investopedia Stock Simulator, therefore you should have Python installed on your system.  I recommend using Python 3.12.2 or later to avoid running into issues or other problems.  You can download Python [here](https://www.python.org/downloads/).
+## Install
 
-### Git (optional)
-This API is not currently hosted as a package anywhere, so you'll need to download the code directly from GitHub to use it.  [Download and install the latest version of Git](https://git-scm.com/downloads) on your system and run the following in a terminal to download a copy of this repository:
+Python 3.12+ is recommended.
 
-`git clone https://github.com/dchrostowski/investopedia_simulator_api.git/`
-
-Alternatively, you can just download a zipped archive of the source code directly from this project's GitHub page and unzip it somewhere on your filesystem.  To do this, click on the green Code button and select Download ZIP.
-
-### Node.js
-Node.js is utilized to facilitate logging in to the simulator with a virtual web browser and fetching authentication tokens.  [Download and install the latest version of Node.js on your system here.](https://nodejs.org/en/download).
-
-
-## Usage
-
-Once all dependencies are installed, you will need to use pip to install supplementary Python packages to run your code with the API.  Open a terminal on your system and navigate to where you downloaded this code:
-
-```cd path/to/investopedia_simulator_api```
-
-Next run the following command to install the supplementary packages:
-
-```pip install -r ./requirements.txt```
-
-Once all the required packages are installed, you will need to provide your login credentials for the Investopedia Stock Simulator.  Rename the ```credentials_example.json``` file to ```credentials.json```, open it, and replace the username and password values with your actual username and password for logging in to Investopedia.  Make sure you leave the double quotes intaact.
-
-Finally, try running the provided `example.py` file.  This `example.py` file is a usage example of the API.  Feel free to modify it as you see fit for your needs:
-
-```python example.py```
-
-## Example
-### code
+```bash
+git clone https://github.com/AgentKosticka/investopedia_simulator_api.git
+cd investopedia_simulator_api
+pip install -r requirements.txt
 ```
-from investopedia_api import InvestopediaApi
+
+Node.js is only needed when a fresh passwordless login must be bootstrapped:
+
+```bash
+npm install
+```
+
+## Passwordless authentication
+
+Investopedia uses email-based passwordless sign-in. This fork does not require or accept an Investopedia password.
+
+### One-time bootstrap
+
+Create `credentials.json`:
+
+```json
+{
+  "email": "you@example.com"
+}
+```
+
+Then run:
+
+```python
 import json
-from datetime import datetime, timedelta
-from api_models import OptionScope
-from trade_common import OrderLimit, TransactionType, Expiration, StockTrade, OptionTrade
+from investopedia_api import InvestopediaApi
 
-credentials = {}
-with open('credentials.json') as ifh:
-    credentials = json.load(ifh)
-# look at credentials_example.json
-# credentials = {"username": "you@example.org", "password": "yourpassword" }
-client = InvestopediaApi(credentials)
+with open("credentials.json") as f:
+    auth = json.load(f)
 
-p = client.portfolio
-print("\nPortfolio Details")
-print("-------------------------------------------------")
-print("Portfolio Value: %s" % p.account_value)
-print("Cash: %s" % p.cash)
-print("Buying Power: %s" % p.buying_power)
-print("Annual Return Percent: %s" % p.annual_return_pct)
-print("-------------------------------------------------")
+client = InvestopediaApi(auth)
+```
 
-print("\nOpen Orders:")
-# To cancel a pending trade, run open_order.cancel()
-for open_order in p.open_orders:
-    print("-------------------------------------------------")
-    print("Trade Type: %s" % open_order.trade_type)
-    print("Symbol: %s" % open_order.symbol)
-    print("Quantity: %s" % open_order.quantity)
-    print("Price: %s" % open_order.order_price)
-    print("-------------------------------------------------")
-print("-------------------------------------------------")
+When no valid `auth.json` exists, the Python client starts `auth.js` in headless Chromium and enters the email address. Investopedia sends its normal sign-in email; paste the **complete sign-in link** into the terminal.
 
+The helper keeps the same headless browser session alive, follows the magic link, watches the OIDC token exchange, and saves the resulting token data to `auth.json`.
 
-stock_portfolio = p.stock_portfolio
-short_portfolio = p.short_portfolio
-option_portfolio = p.option_portfolio
+If Investopedia issues a refresh token, future runs refresh the access token without opening Chromium or sending another login email.
 
-print("\nStock Portfolio Details:")
-print("-------------------------------------------------")
-print("Market Value: %s" % p.stock_portfolio.market_value)
-print("Today's Gain: %s (%s%%)" % (p.stock_portfolio.day_gain_dollar, p.stock_portfolio.day_gain_percent))
-print("Total Gain: %s (%s%%)" % (p.stock_portfolio.total_gain_dollar, p.stock_portfolio.total_gain_percent))
-print("-------------------------------------------------")
+You can run the bootstrap directly too:
 
-print("\nLong Positions:")
-for position in p.stock_portfolio:
-    print("-------------------------------------------------")
-    print("Company: %s (%s)" % (position.description, position.symbol))
-    print("Shares: %s" % position.quantity)
-    print("Purchase Price: %s" % position.purchase_price)
-    print("Current Price: %s" % position.current_price)
-    print("Today's Gain: %s (%s%%)" % (position.day_gain_dollar, position.day_gain_percent))
-    print("Total Gain: %s (%s%%)" % (position.total_gain_dollar, position.total_gain_percent))
-    print("Market/Total Value: %s" % position.market_value)
-    print("\t------------------------------")
-    print("\tQuote")
-    print("\t------------------------------")
-    quote = position.quote
-    for k,v in quote.__dict__.items():
-        print("\t%s: %s" % (k,v))
-    print("\t------------------------------")
-    print("-------------------------------------------------")
+```bash
+node auth.js you@example.com
+```
 
+Useful environment variables:
 
-print("\nShort Positions:")
-for position in p.short_portfolio:
-    print("-------------------------------------------------")
-    print("Company: %s (%s)" % (position.description, position.symbol))
-    print("Shares: %s" % position.quantity)
-    print("Purchase Price: %s" % position.purchase_price)
-    print("Current Price: %s" % position.current_price)
-    print("Today's Gain: %s (%s%%)" % (position.day_gain_dollar, position.day_gain_percent))
-    print("Total Gain: %s (%s%%)" % (position.total_gain_dollar, position.total_gain_percent))
-    print("Market/Total Value: %s" % position.market_value)
-    print("\t------------------------------")
-    print("\tQuote")
-    print("\t------------------------------")
-    quote = position.quote
-    for k,v in quote.__dict__.items():
-        print("\t%s: %s" % (k,v))
-    print("\t------------------------------")
-    print("-------------------------------------------------")
+```bash
+INVESTOPEDIA_EMAIL=you@example.com
+INVESTOPEDIA_HEADFUL=1
+INVESTOPEDIA_MAGIC_LINK="https://..."
+INVESTOPEDIA_AUTH_FILE=/path/to/auth.json
+PUPPETEER_NO_SANDBOX=1
+PUPPETEER_DISABLE_DEV_SHM=1
+```
 
-print("\nOption Positions:")
-for position in p.option_portfolio:
-    print("-------------------------------------------------")
-    print("Company: %s (%s)" % (position.description, position.underlying_symbol))
-    print("Symbol: %s" % position.symbol)
-    print("Contracts: %s" % position.quantity)
-    print("Purchase Price: %s" % position.purchase_price)
-    print("Current Price: %s" % position.current_price)
-    print("Today's Gain: %s (%s%%)" % (position.day_gain_dollar, position.day_gain_percent))
-    print("Total Gain: %s (%s%%)" % (position.total_gain_dollar, position.total_gain_percent))
-    print("Market/Total Value: %s" % position.market_value)
-    print("\t------------------------------")
-    print("\tQuote")
-    print("\t------------------------------")
-    quote = position.quote
-    for k,v in quote.__dict__.items():
-        print("\t%s: %s" % (k,v))
-    print("\t------------------------------")
-    print("-------------------------------------------------")
+`PUPPETEER_NO_SANDBOX=1` is intended for containers that genuinely cannot run Chromium's sandbox.
 
-# Make a stock trade
-    
-# Buy 2 shares of GOOG with limit $100 and no expiration
-tt1 = TransactionType.BUY
-ol1 = OrderLimit.LIMIT(100)
-exp1 = Expiration.GOOD_UNTIL_CANCELLED()
-trade1 = StockTrade(portfolio_id=p.portfolio_id, symbol="GOOG", quantity=2, transaction_type=tt1, order_limit=ol1, expiration=exp1)
-trade1.validate()
-trade1.execute()
+### Existing tokens
 
-# Buy 3 shares of AAPL at market value with expiration set to end of day
-# defaults order_limit to OrderLimit.MARKET() and expiration to Expiration.END_OF_DAY())
-trade2 = StockTrade(portfolio_id=p.portfolio_id, symbol='AAPL', quantity=3, transaction_type=TransactionType.BUY)
-trade2.validate()
-trade2.execute()
+You can bypass Chromium and pass token data directly:
 
-# short sell 1 share of AMZN
-trade3 = StockTrade(portfolio_id=p.portfolio_id, symbol='AMZN', quantity=1, transaction_type=TransactionType.SELL_SHORT)
-trade3.validate()
-trade3.execute()
+```python
+client = InvestopediaApi({
+    "access_token": "...",
+    "refresh_token": "..."
+})
+```
 
+The aliases `auth_token` and `bearer_token` are also accepted for the access token.
 
-client.refresh_portfolio()
-p = client.portfolio
+Or use environment variables:
 
-for open_order in p.open_orders:
-    if open_order.symbol == 'GOOG' and open_order.quantity == 2:
-        # cancel GOOG trade
-        open_order.cancel()
-    
-    if open_order.symbol == 'AAPL' and open_order.quantity == 3:
-        # cancel AAPL trade
-        open_order.cancel()
+```bash
+export INVESTOPEDIA_ACCESS_TOKEN="..."
+export INVESTOPEDIA_REFRESH_TOKEN="..."
+```
 
-    if open_order.symbol == 'AMZN' and open_order.quantity == 1:
-        # cancel AMZN trade
-        open_order.cancel()
+With only an access token, the client works until that token expires. A refresh token is required for unattended long-running operation.
 
+## Custom games
 
-stock_portfolio = p.stock_portfolio
-if len(p.stock_portfolio) > 0:
-    # first long position in portfolio
-    first_long_position = p.stock_portfolio[0]
-    symbol = first_long_position.symbol
-    quantity = first_long_position.quantity
-    
-    # execute trade to sell position in portfolio
-    first_long_position.sell()
-    client.refresh_portfolio()
-    p = client.portfolio
-    for oo in p.open_orders:
-        if oo.symbol == symbol and oo.quantity == quantity:
-            # cancel trade to sell first position in portfolio
-            oo.cancel()
+All active portfolios associated with the authenticated account are loaded.
 
-short_portfolio = p.short_portfolio
-if len(p.short_portfolio) > 0:
-    # first short position in portfolio
-    first_short_position = p.short_portfolio[0]
-    symbol = first_short_position.symbol
-    quantity = first_short_position.quantity
-    
-    # execute trade to cover position in portfolio
-    first_short_position.cover()
-    client.refresh_portfolio()
-    p = client.portfolio
-    for oo in p.open_orders:
-        # cancel cover trade you just made
-        if oo.symbol == symbol and oo.quantity == quantity:
-            # cancel trade to cover first position in portfolio
-            oo.cancel()
+```python
+client = InvestopediaApi(auth)
 
-if len(p.option_portfolio) > 0:
-    first_option_contract = p.option_portfolio[0]
-    symbol = first_option_contract.symbol
-    quantity = first_option_contract.quantity
-    # close out first option contract in portfolio
-    first_option_contract.close()
-    client.refresh_portfolio()
-    p = client.portfolio
-    for oo in p.open_orders:
-        # cancel order to close out contract
-        if oo.symbol == symbol and oo.quantity == quantity:
-            oo.cancel()
+for portfolio in client.portfolios:
+    print(
+        portfolio.game_name,
+        portfolio.game_id,
+        portfolio.portfolio_id,
+    )
+```
 
+Select an exact game name:
 
-# Gets all available option contracts for AAPL
-oc = client.get_option_chain('AAPL')
-all_options = oc.all()
-print("There are %s available option contracts for AAPL" % len(all_options))
+```python
+client = InvestopediaApi(
+    auth,
+    game_name="My Custom Competition",
+)
+```
 
+Or select by ID:
 
-two_weeks_from_today = datetime.now() + timedelta(days=14)
-print("AAPL in-the-money put options expiring within two weeks:")
-put_options_near_expiration_itm = oc.search(before=two_weeks_from_today, puts=True, calls=False, scope=OptionScope.IN_THE_MONEY)
-for option in put_options_near_expiration_itm:
-    print("%s:\n\tbid: %s\n\task: %s\n\tlast price: %s\n\texpires:%s" % (option.symbol, option.bid, option.ask, option.last, option.expiration.strftime("%m/%d/%Y") ))
+```python
+client = InvestopediaApi(auth, game_id="...")
+client = InvestopediaApi(auth, portfolio_id="...")
+```
 
+Switch later:
 
-option_to_buy = put_options_near_expiration_itm[0]
-trade4 = OptionTrade(portfolio_id=p.portfolio_id, symbol=option_to_buy.symbol, quantity=1, transaction_type=TransactionType.BUY)
-trade4.validate()
-trade4.execute()
-client.refresh_portfolio()
+```python
+client.change_portfolio(game_name="My Custom Competition")
+```
 
-p = client.portfolio
-for oo in p.open_orders:
-    if oo.symbol == option_to_buy.symbol:
-        oo.cancel()
+Only active games returned by Investopedia for that account can be selected.
 
-    ```
+## Trading example
+
+```python
+from investopedia_api import StockTrade, TransactionType
+
+portfolio = client.portfolio
+
+trade = StockTrade(
+    portfolio_id=portfolio.portfolio_id,
+    symbol="AAPL",
+    quantity=1,
+    transaction_type=TransactionType.BUY,
+)
+
+trade.validate()
+trade.execute()
+```
+
+`example.py` is deliberately read-only by default so running it cannot accidentally submit simulator orders.
+
+## Security
+
+`auth.json`, `credentials.json`, and `.env` are ignored by Git.
+
+Treat access tokens, refresh tokens, passwordless magic links, and email credentials as secrets. For a server deployment, prefer a protected `auth.json` volume or secret-backed environment variables.
+
+## Implementation notes
+
+The trading client talks directly to Investopedia's simulator GraphQL endpoint:
+
+```text
+https://api.investopedia.com/simulator/graphql
+```
+
+Authentication uses Investopedia's OIDC bearer tokens. Refresh tokens are exchanged with the `finance-simulator` client at the current `auth.investopedia.com` OIDC endpoint.
+
+The browser helper is only an authentication bootstrap. Portfolio reads and trades are made by the Python GraphQL client.
+
+This is an unofficial client for an undocumented backend. Investopedia can change its login flow, GraphQL schema, or simulator behavior without notice.

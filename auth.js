@@ -1,110 +1,177 @@
-import puppeteer from "puppeteer";
 import fs from "fs";
+import path from "path";
+import readline from "readline";
+import { fileURLToPath } from "url";
+import puppeteer from "puppeteer";
 
-let fileWritten = false
-const waitFor = async (timeToWait) => {
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const authPath =
+  process.env.INVESTOPEDIA_AUTH_FILE || path.join(__dirname, "auth.json");
 
-    return new Promise(resolve => {
-        setTimeout(() => {
-            return resolve()
-        },timeToWait)
-    })
-
+const email = process.argv[2] || process.env.INVESTOPEDIA_EMAIL;
+if (!email) {
+  console.error("Usage: node auth.js <email>");
+  console.error("Or set INVESTOPEDIA_EMAIL.");
+  process.exit(2);
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const ask = (question) =>
+  new Promise((resolve) => {
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
 
-(async () => {
-    //const links = JSON.parse(await fs.readFileSync('../gurufocus_unscrapable.json'))
-    if(process.argv.length !== 4) {
-        console.error("invalid arguments.")
-        process.exit(1)
+let authData = null;
+let fallbackAccessToken = null;
+
+const saveAuth = (data) => {
+  const output = {
+    ...data,
+    obtained_at: Math.floor(Date.now() / 1000),
+  };
+  fs.writeFileSync(authPath, `${JSON.stringify(output, null, 2)}\n`);
+  authData = output;
+};
+
+const launchArgs = [];
+if (process.env.PUPPETEER_NO_SANDBOX === "1") {
+  launchArgs.push("--no-sandbox", "--disable-setuid-sandbox");
+}
+if (process.env.PUPPETEER_DISABLE_DEV_SHM === "1") {
+  launchArgs.push("--disable-dev-shm-usage");
+}
+
+const browser = await puppeteer.launch({
+  headless: process.env.INVESTOPEDIA_HEADFUL !== "1",
+  args: launchArgs,
+});
+
+try {
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1366, height: 900 });
+
+  page.on("response", async (response) => {
+    if (!response.url().includes("/protocol/openid-connect/token")) {
+      return;
     }
-    const username = process.argv[2]
-    const password = process.argv[3]
-    const browser = await puppeteer.launch()
-    const page = await browser.newPage()
-    const link = 'https://investopedia.com/simulator'
 
     try {
-        const browser = await puppeteer.launch();
-        const page = await browser.newPage();
-        await page.setViewport({width: 1366, height: 768});
-        await page.setUserAgent('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.108 Safari/537.36');
-        let authHeader = null
-
-        page.on('response', async response => {
-            if(response.url() === 'https://www.investopedia.com/auth/realms/investopedia/protocol/openid-connect/token') {
-                const response_json = await response.json()
-                fs.writeFileSync('./auth.json',JSON.stringify(response_json))
-                fileWritten = true
-            }
-        })
-
-        await page.goto(link, {waitUntil:'load',timeout: 15000})
-        //await page.waitForXPath('//span[contains(text(),"LOG IN")]', {timeout: 3000})
-        const loginButton = await page.waitForSelector('::-p-xpath(//span[contains(text(),"LOG IN")])', {timeout: 3000})
-        
-        await loginButton.click()
-	    await waitFor(6000)
-
-        const usernameField = await page.waitForSelector('::-p-xpath(//input[@id="username"])', {timeout: 3000})
-        const passwordField = await page.waitForSelector('::-p-xpath(//input[@id="password"])', {timeout: 3000})
-        const signInButton = await page.waitForSelector('::-p-xpath(//input[@id="login"])', {timeout: 3000})
-
-
-        await usernameField.type(username)
-        await passwordField.type(password)
-
-        await waitFor(6000)
-        
-
-        await signInButton.click()
-
-        await waitFor(6000)
-        await page.screenshot()
-
-        const passwordField2 = await page.waitForSelector('::-p-xpath(//input[@id="password"])', {timeout: 3000})
-        passwordField2.type(password)
-
-        await page.screenshot()
-
-        // page.on('request', request => {
-        //     const url = request.url()
-        //     if(url === 'https://api.investopedia.com/simulator/graphql' && authHeader === null) {
-        //         const requestHeaders = request.headers()
-        //         if(requestHeaders?.authorization) {
-        //             authHeader = {'Authorization': requestHeaders['authorization']}
-        //             console.log("successfully extracted auth token.")
-        //             fs.writeFileSync(`./auth.json`, JSON.stringify(authHeader))
-        //         }
-                
-        //     }
-        // })
-
-       
-
-        const signInButton2 = await page.waitForSelector('::-p-xpath(//input[@id="login"])', {timeout: 3000})
-        await signInButton2.click()
-	    await page.screenshot()
-        
-        await page.waitForSelector('::-p-xpath(//div[contains(@class,"v-main__wrap")])')
-
+      const data = await response.json();
+      if (data?.access_token) {
+        saveAuth(data);
+      }
+    } catch {
+      // Ignore non-JSON responses from unrelated auth requests.
     }
-    catch(err) {
-        if(!fileWritten) {
-            console.error(err)
-        }
-        
+  });
+
+  page.on("request", (request) => {
+    if (!request.url().includes("/simulator/graphql")) {
+      return;
     }
 
-    finally {
-        await page.close()
-        await browser.close();
-        if(fileWritten) {
-            console.log("login successful")
-        }
-        process.exit(0)
+    const authorization = request.headers().authorization;
+    if (authorization?.toLowerCase().startsWith("bearer ")) {
+      fallbackAccessToken = authorization.slice(7).trim();
     }
+  });
 
-  })();
+  await page.goto("https://www.investopedia.com/simulator/portfolio", {
+    waitUntil: "domcontentloaded",
+    timeout: 30000,
+  });
+
+  // In the current Keycloak flow the initial page can be registration-oriented
+  // and expose a "Sign In Now" link. Prefer that before filling an email field.
+  const signInCandidates = await page.$$("a, button");
+  for (const candidate of signInCandidates) {
+    const label = await candidate.evaluate((element) =>
+      (element.innerText || element.textContent || "").trim().toLowerCase()
+    );
+    if (label === "sign in now" || label === "sign in" || label === "log in") {
+      await candidate.click();
+      await sleep(500);
+      break;
+    }
+  }
+
+  const emailSelector =
+    'input#username, input[name="username"], input[type="email"]';
+  const emailField = await page.waitForSelector(emailSelector, {
+    timeout: 15000,
+  });
+
+  await emailField.click({ clickCount: 3 });
+  await emailField.type(email);
+
+  const submitSelector =
+    'button[type="submit"], input[type="submit"], input#login, button#login';
+  const submit = await page.$(submitSelector);
+  if (submit) {
+    await submit.click();
+  } else {
+    await emailField.press("Enter");
+  }
+
+  await sleep(1500);
+
+  console.log("");
+  console.log(`Investopedia sent a passwordless sign-in email to ${email}.`);
+  console.log("Paste the COMPLETE sign-in link from that email below.");
+  console.log("Chromium remains headless; this manual step is only needed for fresh auth.");
+  console.log("");
+
+  const magicLink =
+    process.env.INVESTOPEDIA_MAGIC_LINK || (await ask("Magic link: "));
+
+  if (!/^https?:\/\//i.test(magicLink)) {
+    throw new Error("The supplied magic link is not an http(s) URL.");
+  }
+
+  await page.goto(magicLink, {
+    waitUntil: "networkidle2",
+    timeout: 45000,
+  });
+
+  // Make sure the simulator app initializes after the email-link callback.
+  if (!page.url().includes("/simulator")) {
+    await page.goto("https://www.investopedia.com/simulator/portfolio", {
+      waitUntil: "networkidle2",
+      timeout: 45000,
+    });
+  }
+
+  for (let i = 0; i < 40 && !authData; i += 1) {
+    await sleep(500);
+  }
+
+  if (!authData && fallbackAccessToken) {
+    saveAuth({ access_token: fallbackAccessToken });
+    console.warn(
+      "Captured an access token but no refresh token. The Python client will " +
+        "work until the access token expires; re-run auth.js when necessary."
+    );
+  }
+
+  if (!authData) {
+    throw new Error(
+      "Login completed without exposing an Investopedia OIDC/bearer token."
+    );
+  }
+
+  console.log(`Authentication saved to ${authPath}.`);
+  if (authData.refresh_token) {
+    console.log("Refresh token captured; later runs can refresh headlessly.");
+  }
+} finally {
+  await browser.close();
+}
